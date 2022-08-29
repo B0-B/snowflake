@@ -3,13 +3,135 @@
 
 import threading
 from multiprocessing import Process
+from subprocess import Popen, PIPE
 from datetime import datetime
 from numpy.random import uniform, choice, randint
-from traceback import format_exc
+from traceback import format_exc, print_exc
 import binascii
 from time import sleep
 import http.server, ssl, cgi
 import json
+
+class Job:
+
+    '''
+    API to steer and trace the Job on kernel level.
+    '''
+
+    def __init__ (self, requestObject):
+
+        # check and apply operating arguments
+        self.id = self._checkArgAndAssign('id', str, '', requestObject, mandatory=True)
+        self.target_path = self._checkArgAndAssign('target_path', str, '', requestObject, mandatory=True)
+        #self.active = self._checkArgAndAssign('active', bool, False, requestObject)
+        self.arguments = self._checkArgAndAssign('arguments', str, '', requestObject)
+        self.command = self._checkArgAndAssign('command', str, '', requestObject)
+        #self.repeat = self._checkArgAndAssign('repeat', bool, False, requestObject)
+        #self.repeat_sleep = self._checkArgAndAssign('repeat_sleep', int, 1, requestObject)
+
+        # try to suggest a command if the corresponding 
+        # argument was not provided. If this is not possible
+        # a ValueError will be raised.
+        if self.command == '':
+            self._suggestStartCommand()
+        
+        # create a start command object which will be passed 
+        # directly into the process call
+        self.startCommandObject = [self.command, self.target_path, self.arguments]
+        
+        # process architecture
+        # self.process = Process(target=self._workload)
+        self.subprocess = None
+    
+    def isAlive (self):
+
+        '''
+        A public alias of _subprocessIsAlive.
+        The general isAlive response depends fully on the subprocess status.
+        '''
+        return self._subprocessIsAlive()
+
+    def start (self):
+
+        '''
+        Invokes the job.
+        '''
+
+        self.subprocess = Popen(self.startCommandObject, stdout=PIPE, stderr=PIPE)
+        #print(f'subprocess {self.id} initiated ...')    
+        #self.process.start()
+        print(f'subprocess {self.id} initiated ...') 
+
+    def stop (self):
+
+        '''
+        Stops main- and subprocess immediately.
+        '''
+
+        # stop the outer loop first to prevent a repeating inner subprocess
+        #self.process.terminate()
+
+        # terminate the subprocess as well
+        try:
+            while self._subprocessIsAlive():
+                self.subprocess.kill()
+                sleep(.5)
+        except:
+            print_exc()
+        # finally:  
+        #     # flip the active switch
+        #     if not self._subprocessIsAlive():
+        #         self.active = False
+
+    # - private methods
+    def _await (self, subprocess):
+
+        '''
+        Blocks an asynchronous subprocess.
+        This method simulates the async await context.
+        '''
+
+        subprocess.communicate()
+
+    def _checkArgAndAssign (self, arg, argType, expected, requestObject, mandatory=False):
+
+        '''
+        Simple routine to check if an argument was provided correctly.
+        '''
+        if arg in requestObject and type(requestObject[arg]) == argType:
+            return requestObject[arg]
+        else:
+            if mandatory:
+                raise ValueError(f'{arg} not specified correctly, {arg} must be a {argType} type.')
+            return expected
+
+    def _subprocessIsAlive (self):
+
+        '''
+        Returns a boolean based on the subprocess status.
+        '''
+
+        return self.subprocess.poll() == None
+    
+    def _suggestStartCommand (self):
+
+        '''
+        Suggests a start command based on file extension
+        in provided target path otherwise raises an error.
+        '''
+
+        if self.command == '':
+            if '.py' in self.target_path:
+                self.command= 'python3'
+            elif '.sh' in self.target_path:
+                self.command = 'bash'
+            elif '.js' in self.target_path:
+                self.command = 'node'
+            elif '.go' in self.target_path:
+                self.command = 'go run'
+            else:
+                raise ValueError(f'Could not determine a suitable command for this {self.target_path}!')
+      
 
 class pipe(threading.Thread):
 
@@ -181,20 +303,25 @@ class Core:
         # -- certain parameters --
         # create a dedicated job id
         job_id = self._generateJobId()
+        # pass the id to the request object
+        # so that the Job object can use it
+        # via the request object.
+        requestObject['id'] = job_id
         # denote creation time
         time_created = self._generateUTCTimestamp()
         # create a process object
-        process = None
+        job_object = Job(requestObject)
 
         # append new job to jobs object
         self.jobs[job_id] = {
             "active": active,
             "disabled": disable,
+            "finished": False,
             "id": job_id,
+            "job": job_object,
             "name": requestObject['name'],
             "operating_time_window": operating_time_window,                 
             "operating_week_days": operating_week_days,
-            "process": process,
             "repeat": True,
             "repeat_sleep": 0,
             "target_path": requestObject['target_path'],
@@ -212,20 +339,18 @@ class Core:
 
         if not job['active']:
             job['active'] = True
-        if not job['process'].is_alive():
-            job['process'].start()
+            job['finished'] = False
+            job['job'].start()
     
-    def _cronProcess (self, requestObject):
-        pass
-
     def _deactivateIfActive (self, id):
 
         job = self.jobs[id]
 
         if job['active']:
             job['active'] = False
-        if job['process'].is_alive():
-            job['process'].terminate()
+            self.log(f'Terminating job {id} ...', end='\r')
+            job['job'].stop()
+            self.log(f'Successfully terminated {id}.\n', 'green', end='\r')
 
     def _generateJobId (self):
         
@@ -259,13 +384,18 @@ class Core:
 
         for id, job in self.jobs.items():
 
+            # override the current activity variable
+            # by measuring if the subprocess is alive.
+            # This ensures that isAlive() method will not be called inflationary.
+            job['active'] = job['job'].isAlive()
+
             # skip this job if it is disabled on purpose,
             # also make sure everything is deactivated.
             if job['disabled']:
                 self._deactivateIfActive(id)
                 pass
 
-            # check for weekday
+            # check for weekday and skip if the current day is not included
             if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
                 self._deactivateIfActive(id)
                 pass
@@ -274,22 +404,16 @@ class Core:
             if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
                 self._deactivateIfActive(id)
                 pass
-            else:
-                if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
-                    self._deactivateIfActive(id)
-                    pass
-                else:
-                    self._activateIfDeactivated(id)
+            if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
+                self._deactivateIfActive(id)
+                pass
 
-            # update final activity
-            if job['active'] and not job['process'].is_alive():
-                # initialize the multiprocessing process
-                job['process'].start()
-            elif not job['active'] and job['process'].is_alive():
-                # stop the multiprocessing process
-                job['process'].terminate()
-
-          
+            # make sure that the job is finished in case
+            # that the job should not be repeated.
+            if not job['finished']:
+                self._activateIfDeactivated(id)
+            if not job['repeat'] and not job['finished']:
+                job['finished'] = True
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
 

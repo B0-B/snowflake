@@ -20,11 +20,11 @@ class Job:
         # check and apply operating arguments
         self.id = self._checkArgAndAssign('id', str, '', requestObject, mandatory=True)
         self.target_path = self._checkArgAndAssign('target_path', str, '', requestObject, mandatory=True)
-        self.active = self._checkArgAndAssign('active', bool, False, requestObject)
+        #self.active = self._checkArgAndAssign('active', bool, False, requestObject)
         self.arguments = self._checkArgAndAssign('arguments', str, '', requestObject)
         self.command = self._checkArgAndAssign('command', str, '', requestObject)
-        self.repeat = self._checkArgAndAssign('repeat', bool, False, requestObject)
-        self.repeat_sleep = self._checkArgAndAssign('repeat_sleep', int, 1, requestObject)
+        #self.repeat = self._checkArgAndAssign('repeat', bool, False, requestObject)
+        #self.repeat_sleep = self._checkArgAndAssign('repeat_sleep', int, 1, requestObject)
 
         # try to suggest a command if the corresponding 
         # argument was not provided. If this is not possible
@@ -39,6 +39,9 @@ class Job:
         # process architecture
         self.subprocess = None
         #self.process = Process(target=self._workload)
+
+    def isAlive (self):
+        return self._subprocessIsAlive()
 
     def start (self):
 
@@ -67,10 +70,10 @@ class Job:
                 sleep(.5)
         except:
             print_exc()
-        finally:  
-            # flip the active switch
-            if not self._subprocessIsAlive():
-                self.active = False
+        # finally:  
+        #     # flip the active switch
+        #     if not self._subprocessIsAlive():
+        #         self.active = False
 
     # - private methods
     def _await (self, subprocess):
@@ -121,34 +124,34 @@ class Job:
             else:
                 raise ValueError(f'Could not determine a suitable command for this {self.target_path}!')
         
-    def _workload (self):
+    # def _workload (self):
 
-        '''
-        Repetitive workload piped to a new shell.
-        Every subprocess is kept persistent for communication.
-        '''
+    #     '''
+    #     Repetitive workload piped to a new shell.
+    #     Every subprocess is kept persistent for communication.
+    #     '''
 
-        # print(f'subprocess {self.id} initiated ...')
-        # self.subprocess = Popen([self.command, self.target_path, self.arguments], stdout=PIPE, stderr=PIPE)
+    #     # print(f'subprocess {self.id} initiated ...')
+    #     # self.subprocess = Popen([self.command, self.target_path, self.arguments], stdout=PIPE, stderr=PIPE)
             
 
-        while self.active: 
+    #     while self.active: 
 
-            # create a subprocess
-            print(f'subprocess {self.id} initiated ...')
-            self.subprocess = Popen([self.command, self.target_path, self.arguments], stdout=PIPE, stderr=PIPE)
+    #         # create a subprocess
+    #         print(f'subprocess {self.id} initiated ...')
+    #         self.subprocess = Popen([self.command, self.target_path, self.arguments], stdout=PIPE, stderr=PIPE)
             
-            #block while process is still alive
-            self._await(self.subprocess)
+    #         #block while process is still alive
+    #         self._await(self.subprocess)
 
-            if not self.repeat:
-                break
+    #         if not self.repeat:
+    #             break
             
-            while True:
-                if not self._subprocessIsAlive():
-                    break
-                sleep(.2)
-            sleep(self.repeat_sleep)
+    #         while True:
+    #             if not self._subprocessIsAlive():
+    #                 break
+    #             sleep(.2)
+    #         sleep(self.repeat_sleep)
         
 if __name__ == '__main__':
 
@@ -163,5 +166,5 @@ if __name__ == '__main__':
     print('alive', j._subprocessIsAlive())
     j.stop()
     #sleep(4)
-    print('alive after stop', j._subprocessIsAlive())
+    print('stopped', not j._subprocessIsAlive())
     sleep(10)
