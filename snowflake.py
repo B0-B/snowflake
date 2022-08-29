@@ -4,11 +4,33 @@
 import threading
 from multiprocessing import Process
 from datetime import datetime
-from numpy.random import uniform, choice
+from numpy.random import uniform, choice, randint
+from traceback import format_exc
 import binascii
 from time import sleep
 import http.server, ssl, cgi
 import json
+
+class pipe(threading.Thread):
+
+    def __init__(self, function, wait, *args):
+        self.wait = wait
+        threading.Thread.__init__(self)
+        self.func = function
+        self.args = args
+        self.stoprequest = threading.Event()
+
+    def run(self):
+        while not self.stoprequest.isSet():
+            try: # important during init, otherwise crash
+                self.func(*self.args)
+                sleep(self.wait)
+            except:
+                pass
+
+    def stop(self, timeout = None):
+        self.stoprequest.set()
+        super(pipe, self).join(timeout)
 
 class Core:
 
@@ -45,6 +67,11 @@ class Core:
 
         # API and request parameters
         self.mandatory_parameters = ['name', 'target_path', 'command']
+
+        # managing daemon
+        self.daemon = pipe(self._manage, wait=.1)
+        self.daemon.start()
+        self.log('Started job management daemon.')
     
     def list_to_console (self):
 
@@ -52,12 +79,12 @@ class Core:
         A dashboard-like summary output of all deployed jobs.
         '''
 
-        print('job name\tstatus\tcreated\tjob id')
+        print('job\t\tactive\t\tdisabled\tcreated\t\t\tjob id')
         for id, job in self.jobs.items():
             a_col = '\033[92m'
-            if not job["status"]: 
+            if not job["active"]: 
                 a_col = '\033[91m'
-            print(f'{job["name"]}\t{a_col}{job["status"]}\033[0m\t{job["time_created"]}\t{id}')
+            print(f'{job["name"]}\t\t{a_col}{job["active"]}\033[0m\t\t{job["disabled"]}\t\t{job["time_created"]}\t{id}')
 
     def log (self, stdout, color='', indent=0, end='\n'):
 
@@ -71,7 +98,7 @@ class Core:
             head = ''
             indent = ''.join(['\t']*indent)
         else:
-            head = f'\033[96m[ {self.name} | {datetime.today().strftime("%m-%d-%Y %H:%M:%S")} ]\033[0m\t'
+            head = f'\033[96m[ {self.name} | {self._generateUTCTimestamp()} ]\033[0m\t'
             indent = ''
         if 'green' in color:
             color = '\033[92m'
@@ -84,7 +111,6 @@ class Core:
         else:
             color = '\033[0m'
         print(f'{head}{indent}{color}{stdout}\033[0m', end=end)
-    
     
     def newJob (self, requestObject):
 
@@ -153,22 +179,17 @@ class Core:
             return False, stdout
 
         # -- certain parameters --
-        # the job id is a randomly generated 16 char hex string
-        job_id = binascii.b2a_hex(uniform(size=16))
+        # create a dedicated job id
+        job_id = self._generateJobId()
         # denote creation time
-        time_created = datetime.utcnow()
-
+        time_created = self._generateUTCTimestamp()
         # create a process object
-        wrap = lambda : self.wrapper(func, args=args, repeat=repeat, wait=repeat_sleep)
-        process = Process(target=wrap)
+        process = None
 
-        if operating_week_days != 'all':
-            operating_week_days = [d.lower()[:3] for d in operating_week_days]
-
-        # package
+        # append new job to jobs object
         self.jobs[job_id] = {
             "active": active,
-            "disable": disable,
+            "disabled": disable,
             "id": job_id,
             "name": requestObject['name'],
             "operating_time_window": operating_time_window,                 
@@ -182,6 +203,8 @@ class Core:
             "time_stopped": None
         }
 
+        return True, stdout
+
     # - private methods
     def _activateIfDeactivated (self, id):
 
@@ -192,6 +215,9 @@ class Core:
         if not job['process'].is_alive():
             job['process'].start()
     
+    def _cronProcess (self, requestObject):
+        pass
+
     def _deactivateIfActive (self, id):
 
         job = self.jobs[id]
@@ -200,6 +226,24 @@ class Core:
             job['active'] = False
         if job['process'].is_alive():
             job['process'].terminate()
+
+    def _generateJobId (self):
+        
+        '''
+        Generates a new job id.
+        The job id is a randomly generated and unique 8 Byte string i.e 16 hex values.
+        '''
+        
+        while True:
+            # 8 bytes seed
+            byte_seed = randint(0, 255, 8)
+            job_id = ''.join(''.join([hex(b) for b in byte_seed]).split('0x'))
+            if job_id not in self.jobs:
+                return job_id
+
+    def _generateUTCTimestamp (self):
+
+        return datetime.today().strftime("%m-%d-%Y %H:%M:%S")
 
     def _manage (self):
         
@@ -244,8 +288,8 @@ class Core:
             elif not job['active'] and job['process'].is_alive():
                 # stop the multiprocessing process
                 job['process'].terminate()
-            
-    
+
+          
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
 
@@ -276,7 +320,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         ctype, pdict = cgi.parse_header(self.headers['Content-Type'])
-
+        
         # refuse to receive non-json content
         if ctype != 'application/json':
             self.send_response(400)
@@ -284,17 +328,31 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # exctract json package
-        # double loads turns to dict type, this dictionary
-        # will be the extracted request object
+        # double loads turns to dict type, 
+        # this dictionary will be the extracted request object
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
         requestObject = json.loads(jsonPkg) 
 
         # determine request type
-        if requestObject['request'].lower() == 'job':
-            self.Core.log(f"new job request submitted ...", 'y')
-            self.Core.newJob(requestObject)
+        #   - request: will add a request object
+        #   - ls: list all jobs with info
+        if requestObject['request'].lower() == 'ls':
+            self.Core.list_to_console()
+        elif requestObject['request'].lower() == 'job':
+            self.Core.log(f"New job request submitted ...", 'y')
+            try:
+                success, info = self.Core.newJob(requestObject)
+                if success:
+                    self.Core.log(f"Successfully added new cron job process '{requestObject['name']}'", 'y')
+                else:
+                    self.Core.log(info, 'red')
+            except:
+                self.Core.log('An exception occured with the request from', 'red')
+                self.Core.log(format_exc(), 'red')        
+        
 
 
-PORT = 3000
-with http.server.HTTPServer(('localhost', PORT), APIHandler) as srv:
-    srv.serve_forever()
+if __name__ == '__main__':
+    PORT = 3000
+    with http.server.HTTPServer(('localhost', PORT), APIHandler) as srv:
+        srv.serve_forever()

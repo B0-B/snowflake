@@ -24,8 +24,17 @@ if __name__ == '__main__':
 
     c = client()
 
+    # jobRequest = {
+    #     'request': 'job',
+    #     'name': 'test',
+    #     'target_path': '~/snowflake/test_job.py',
+    #     'command': 'python3',
+    #     'key': 'hello'    
+    # }
+    # c.post(jobRequest)
+
     jobRequest = {
-        'request': 'job',
+        'request': 'ls',
         'name': 'test',
         'target_path': '~/snowflake/test_job.py',
         'command': 'python3',
