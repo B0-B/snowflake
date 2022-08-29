@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import threading
 from multiprocessing import Process
 from datetime import datetime
 from numpy.random import uniform, choice
@@ -29,7 +30,7 @@ class Core:
 
     s n o w  f l a k e
 
-         🄯 {datetime.now().year} 
+         🄯 {min([2022, datetime.now().year])} 
     '''
 
     name = 'snowflake'
@@ -41,8 +42,11 @@ class Core:
 
         # process data
         self.jobs = {}
+
+        # API and request parameters
+        self.mandatory_parameters = ['name', 'target_path', 'command']
     
-    def info_to_console (self):
+    def list_to_console (self):
 
         '''
         A dashboard-like summary output of all deployed jobs.
@@ -80,23 +84,79 @@ class Core:
         else:
             color = '\033[0m'
         print(f'{head}{indent}{color}{stdout}\033[0m', end=end)
-
-    def new_job (self, func, args=(), name=None, operating_week_days='all', repeat=False, repeat_sleep=1):
+    
+    
+    def newJob (self, requestObject):
 
         '''
+        Creates a new entry in jobs object.
+        
         Adds a new job by provided variables.
 
         FORMAT
         operating_week_days: ['mon', 'tue', 'wed', 'thu', 'sat', 'sun']
+
+        RETURN
+        (bool, string)-tuple
+        The bool value will be true if the request was accepted, otherwise False 
+        and the string will serve as info message.
         '''
 
-        # id and name
-        if not name: name = func.__name__
-        job_id = binascii.b2a_hex(uniform(size=16))                 # create a random 16 char hex string
-        #job_id = max(list(self.jobs.values()))+1
+        stdout = ''
 
+
+        ''' Request Policy Check '''
+        # -- mandatory parameters --
+        for p in self.mandatory_parameters:
+            if p not in requestObject:
+                stdout = f'Key "{p}" not specified, the mandatory request parameters are {self.mandatory_parameters}'
+                return False, stdout
+
+        # -- optional parameters --
+        if "active" in requestObject:
+            active = requestObject["active"]
+            if type(active) is not bool:
+                stdout = f"active must be boolean!"
+        else:
+            active = False
+        if "disable" in requestObject:
+            disable = requestObject["disable"]
+            if type(disable) is not bool:
+                stdout = f"disable must be boolean!"
+        else:
+            disable = False
+        if "operating_time_window" in requestObject:
+            operating_time_window = requestObject["operating_time_window"]
+            if len(operating_time_window) != 2 or ':' not in operating_time_window[0] or ':' not in operating_time_window[1]:
+                stdout = f"'operating_time_window' wrongly specified! Need a valid time window e.g. '[12:00, 14:30]'"
+        else:
+            operating_time_window = None
+        if "operating_week_days" in requestObject:
+            if type(operating_week_days) is not list:
+                stdout = f"'operating_week_days' must be a list of strings ['mon', 'tue',..]!"
+            operating_week_days = [d.lower()[:3] for d in requestObject["operating_week_days"]]
+        else:
+            operating_week_days = 'all'
+        if "repeat" in requestObject:
+            repeat = requestObject["repeat"]
+            if type(repeat) is not bool:
+                stdout = f"repeat must be boolean!"
+        else:
+            repeat = False
+        if "repeat_sleep" in requestObject:
+            repeat_sleep = requestObject["repeat"]
+            if type(repeat) is not int or repeat < 0:
+                stdout = f"repeat_sleep must be a positive integer!"
+        else:
+            repeat_sleep = 0
+        if stdout != '':
+            return False, stdout
+
+        # -- certain parameters --
+        # the job id is a randomly generated 16 char hex string
+        job_id = binascii.b2a_hex(uniform(size=16))
         # denote creation time
-        created = datetime.utcnow()
+        time_created = datetime.utcnow()
 
         # create a process object
         wrap = lambda : self.wrapper(func, args=args, repeat=repeat, wait=repeat_sleep)
@@ -107,21 +167,41 @@ class Core:
 
         # package
         self.jobs[job_id] = {
-            "active": False,
-            "disable": False,
+            "active": active,
+            "disable": disable,
             "id": job_id,
-            "name": name,
-            "operating_time_window": None,                          # e.g. ['12:30', '14:30']
+            "name": requestObject['name'],
+            "operating_time_window": operating_time_window,                 
             "operating_week_days": operating_week_days,
             "process": process,
             "repeat": True,
             "repeat_sleep": 0,
-            "time_created": created,
+            "target_path": requestObject['target_path'],
+            "time_created": time_created,
             "time_started": None,
             "time_stopped": None
         }
+
+    # - private methods
+    def _activateIfDeactivated (self, id):
+
+        job = self.jobs[id]
+
+        if not job['active']:
+            job['active'] = True
+        if not job['process'].is_alive():
+            job['process'].start()
     
-    def manage (self):
+    def _deactivateIfActive (self, id):
+
+        job = self.jobs[id]
+
+        if job['active']:
+            job['active'] = False
+        if job['process'].is_alive():
+            job['process'].terminate()
+
+    def _manage (self):
         
         '''
         An automatic steering algorithm.
@@ -165,81 +245,7 @@ class Core:
                 # stop the multiprocessing process
                 job['process'].terminate()
             
-        sleep(.1)
     
-    def wrapper (self, func, args=(), repeat=False, wait=1):
-
-        while True:
-
-            func(*args)
-            if not repeat:
-                break
-            else:
-                sleep(wait)
-
-    # - private methods
-    def _activateIfDeactivated (self, id):
-
-        job = self.jobs[id]
-
-        if not job['active']:
-            job['active'] = True
-        if not job['process'].is_alive():
-            job['process'].start()
-    
-    def _deactivateIfActive (self, id):
-
-        job = self.jobs[id]
-
-        if job['active']:
-            job['active'] = False
-        if job['process'].is_alive():
-            job['process'].terminate()
-
-    def _newJobRequest (self, requestObject):
-
-        '''
-        Creates a new entry in jobs object.
-        '''
-
-        '''
-        Adds a new job by provided variables.
-
-        FORMAT
-        operating_week_days: ['mon', 'tue', 'wed', 'thu', 'sat', 'sun']
-        '''
-
-        # id and name
-        if not name: name = func.__name__
-        job_id = binascii.b2a_hex(uniform(size=16))                 # create a random 16 char hex string
-        #job_id = max(list(self.jobs.values()))+1
-
-        # denote creation time
-        created = datetime.utcnow()
-
-        # create a process object
-        wrap = lambda : self.wrapper(func, args=args, repeat=repeat, wait=repeat_sleep)
-        process = Process(target=wrap)
-
-        if operating_week_days != 'all':
-            operating_week_days = [d.lower()[:3] for d in operating_week_days]
-
-        # package
-        self.jobs[job_id] = {
-            "active": False,
-            "disable": False,
-            "id": job_id,
-            "name": name,
-            "operating_time_window": None,                          # e.g. ['12:30', '14:30']
-            "operating_week_days": operating_week_days,
-            "process": process,
-            "repeat": True,
-            "repeat_sleep": 0,
-            "time_created": created,
-            "time_started": None,
-            "time_stopped": None
-        }
-
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
 
@@ -253,10 +259,14 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     ║ http.server ║ Built-In
     ╚═════════════╝
             ║ 
-        ╔══════════════╗
-        ║ └ APIHandler ║ Extension (Snowflake)
-        ║    └ Core    ║
-        ╚══════════════╝
+        ╔══════════════╗ Snowflake
+        ║ └ APIHandler ║ [BaseHTTRequestHandler]                            
+        ║    ├ Core    ║ 
+        ║    |   ║     ║                  ╔════════╗
+        ║    |   ║     ║ <--------------> ║ Client ║
+        ║    |   ║     ║                  ╚════════╝
+        ║    └ do_POST ║ 
+        ╚══════════════╝ 
     '''
     Core = Core()
 
@@ -274,42 +284,15 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # exctract json package
+        # double loads turns to dict type, this dictionary
+        # will be the extracted request object
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-        dic = json.loads(jsonPkg) # double loads turns to dict
+        requestObject = json.loads(jsonPkg) 
 
-        print('json package', dic)
-
-    
-    
-    
-class handler(http.server.SimpleHTTPRequestHandler):
-
-    '''
-    Main for handling json packages
-    '''
-
-    def do_POST(self):
-
-        # send an ok first
-        self.send_response(200)
-
-        # send header
-        self.send_header('Content-type', 'application/json')
-        
-        ctype, pdict = cgi.parse_header(self.headers['Content-Type'])
-        
-        # refuse to receive non-json content
-        if ctype != 'application/json':
-            self.send_response(400)
-            self.end_headers()
-            return
-            
-        # read the request message and convert it to json
-        jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-        dic = json.loads(jsonPkg) # double loads turns to dict
-        print('dic', dic)
-
-
+        # determine request type
+        if requestObject['request'].lower() == 'job':
+            self.Core.log(f"new job request submitted ...", 'y')
+            self.Core.newJob(requestObject)
 
 
 PORT = 3000
