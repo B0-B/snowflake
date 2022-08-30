@@ -5,12 +5,32 @@ import threading
 from multiprocessing import Process
 from subprocess import Popen, PIPE
 from datetime import datetime
-from numpy.random import uniform, choice, randint
+from numpy.random import randint
 from traceback import format_exc, print_exc
-import binascii
 from time import sleep
-import http.server, ssl, cgi
+import http.server, cgi
 import json
+
+class pipe(threading.Thread):
+
+    def __init__(self, function, wait, *args):
+        self.wait = wait
+        threading.Thread.__init__(self)
+        self.func = function
+        self.args = args
+        self.stoprequest = threading.Event()
+
+    def run(self):
+        while not self.stoprequest.isSet():
+            try: # important during init, otherwise crash
+                self.func(*self.args)
+                sleep(self.wait)
+            except:
+                pass
+
+    def stop(self, timeout = None):
+        self.stoprequest.set()
+        super(pipe, self).join(timeout)
 
 class Job:
 
@@ -78,11 +98,7 @@ class Job:
                 sleep(.5)
         except:
             print_exc()
-        # finally:  
-        #     # flip the active switch
-        #     if not self._subprocessIsAlive():
-        #         self.active = False
-
+        
     # - private methods
     def _await (self, subprocess):
 
@@ -132,35 +148,12 @@ class Job:
             else:
                 raise ValueError(f'Could not determine a suitable command for this {self.target_path}!')
       
-
-class pipe(threading.Thread):
-
-    def __init__(self, function, wait, *args):
-        self.wait = wait
-        threading.Thread.__init__(self)
-        self.func = function
-        self.args = args
-        self.stoprequest = threading.Event()
-
-    def run(self):
-        while not self.stoprequest.isSet():
-            try: # important during init, otherwise crash
-                self.func(*self.args)
-                sleep(self.wait)
-            except:
-                pass
-
-    def stop(self, timeout = None):
-        self.stoprequest.set()
-        super(pipe, self).join(timeout)
-
 class Core:
 
     '''
     A shell level interface to an http.server-compliant cron-job handler.
     Schedules, deploys and monitors jobs with quick access into the process. 
     '''
-
 
     banner=f'''
          ..    ..    
@@ -234,12 +227,10 @@ class Core:
             color = '\033[0m'
         print(f'{head}{indent}{color}{stdout}\033[0m', end=end)
     
-    def newJob (self, requestObject):
+    def deploy (self, requestObject):
 
         '''
-        Creates a new entry in jobs object.
-        
-        Adds a new job by provided variables.
+        Creates a new entry in jobs object and adds a new job by provided variables.
 
         FORMAT
         operating_week_days: ['mon', 'tue', 'wed', 'thu', 'sat', 'sun']
@@ -309,7 +300,7 @@ class Core:
         requestObject['id'] = job_id
         # denote creation time
         time_created = self._generateUTCTimestamp()
-        # create a process object
+        # create a process object (will run internal type tests)
         job_object = Job(requestObject)
 
         # append new job to jobs object
@@ -338,6 +329,7 @@ class Core:
         job = self.jobs[id]
 
         if not job['active']:
+            self.log(f'Starting job {id} ...', 'y', end='\r')
             job['active'] = True
             job['finished'] = False
             job['job'].start()
@@ -347,10 +339,29 @@ class Core:
         job = self.jobs[id]
 
         if job['active']:
-            job['active'] = False
             self.log(f'Terminating job {id} ...', end='\r')
+            job['active'] = False
             job['job'].stop()
             self.log(f'Successfully terminated {id}.\n', 'green', end='\r')
+
+    def _findIdByName (self, name):
+
+        job = self._findIdByName(name)
+        if job:
+            return job['id']
+        return job
+
+    def _findJobByName (self, name):
+
+        '''
+        Returns a job if the name matched the filter
+        otherwise it returns None.
+        '''
+
+        for job in self.jobs:
+            if name == job['name']:
+                return job
+        return None
 
     def _generateJobId (self):
         
@@ -388,36 +399,42 @@ class Core:
             # by measuring if the subprocess is alive.
             # This ensures that isAlive() method will not be called inflationary.
             job['active'] = job['job'].isAlive()
+            print(f'job {id} ')
 
             # skip this job if it is disabled on purpose,
             # also make sure everything is deactivated.
             if job['disabled']:
+                print(0)
                 self._deactivateIfActive(id)
                 pass
 
             # check for weekday and skip if the current day is not included
             if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
+                print(1)
                 self._deactivateIfActive(id)
                 pass
 
             # check for time
             if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
+                print(2)
                 self._deactivateIfActive(id)
                 pass
             if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
+                print(3)
                 self._deactivateIfActive(id)
                 pass
 
             # make sure that the job is finished in case
             # that the job should not be repeated.
             if not job['finished']:
+                print(4)
                 self._activateIfDeactivated(id)
             if not job['repeat'] and not job['finished']:
+                print(5)
                 job['finished'] = True
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
 
-    
     '''
     The API handler is an http.server.BaseHTTPRequestHandler wrapper object
     and parent of the core. Interactions received from a request can reference
@@ -436,6 +453,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         ║    └ do_POST ║ 
         ╚══════════════╝ 
     '''
+
     Core = Core()
 
     def do_POST (self):
@@ -443,38 +461,59 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         # communicate header
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
-        ctype, pdict = cgi.parse_header(self.headers['Content-Type'])
+        ctype, _ = cgi.parse_header(self.headers['Content-Type'])
         
-        # refuse to receive non-json content
+        # reject non-json content
         if ctype != 'application/json':
             self.send_response(400)
             self.end_headers()
             return
 
-        # exctract json package
-        # double loads turns to dict type, 
+        # extract json package
+        # double loads() turns to dict type, 
         # this dictionary will be the extracted request object
+        #print('headers', self.headers) # for testing
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
         requestObject = json.loads(jsonPkg) 
 
-        # determine request type
-        #   - request: will add a request object
-        #   - ls: list all jobs with info
+        '''
+        determine request type
+          - request: will add a request object
+          - ls: list all jobs with info
+          - set: set a specific argument
+        '''
         if requestObject['request'].lower() == 'ls':
             self.Core.list_to_console()
-        elif requestObject['request'].lower() == 'job':
-            self.Core.log(f"New job request submitted ...", 'y')
+        elif requestObject['request'].lower() == 'deploy':
+            self.Core.log(f"Deploying new job request by {self.client_address[0]} ...", 'y')
             try:
-                success, info = self.Core.newJob(requestObject)
+                success, info = self.Core.deploy(requestObject)
                 if success:
-                    self.Core.log(f"Successfully added new cron job process '{requestObject['name']}'", 'y')
+                    self.Core.log(f"Successfully deployed new cron job process '{requestObject['name']}'", 'y')
                 else:
                     self.Core.log(info, 'red')
             except:
                 self.Core.log('An exception occured with the request from', 'red')
                 self.Core.log(format_exc(), 'red')        
-        
-
+        elif requestObject['request'].lower() == 'set':
+            self.Core.log(f"{self.client_address[0]} requested an argument change in '{requestObject['name']}' job.", 'y')
+            try:
+                # get the correct id of the job depending on variables
+                if 'name' in requestObject:
+                    id = self.Core._findIdByName(requestObject['name'])['id']
+                elif 'id' in requestObject:
+                    id = requestObject['id']
+                else:
+                    raise KeyError('No name nor id was provided!')    
+                # unpack the argument and value
+                arg, val = requestObject['argument']
+                # apply
+                self.Core.jobs[id][arg] = val       
+            except:
+                self.Core.log(f'An exception occured during the request from {self.client_address[0]}', 'red')
+                self.Core.log(format_exc(), 'red')  
+        else:
+            self.send_response(403)
 
 if __name__ == '__main__':
     PORT = 3000

@@ -23,23 +23,24 @@ class client:
 if __name__ == '__main__':
 
     c = client()
+    #r = 'deploy'
+    r = 'ls'
+    jobRequest = {
+        'request': r,
+        'name': 'test',
+        'target_path': '~/snowflake/test_job.py',
+        'command': 'python3'
+    }
+    c.post(jobRequest)
 
     # jobRequest = {
-    #     'request': 'job',
+    #     'request': 'ls',
     #     'name': 'test',
     #     'target_path': '~/snowflake/test_job.py',
     #     'command': 'python3',
-    #     'key': 'hello'    
+    #     'arguments': '',
+    #     'repeat': False,
+    #     'repeat_sleep': False,
+    #     'active': False    
     # }
-    # c.post(jobRequest)
-
-    jobRequest = {
-        'request': 'ls',
-        'name': 'test',
-        'target_path': '~/snowflake/test_job.py',
-        'command': 'python3',
-        'arguments': '',
-        'repeat': False,
-        'repeat_sleep': False,    
-    }
     c.post(jobRequest)
