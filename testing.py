@@ -6,7 +6,7 @@ from client import client
 2 disable job
 '''
 
-test_id = 0  
+test_id = 1  
 
 if test_id == 0:
 
@@ -25,7 +25,7 @@ elif test_id == 1:
 
     c = client()
     #r = 'deploy'
-    r = 'lss'
+    r = 'ls'
     jobRequest = {
         'request': r,
         'name': 'test',
