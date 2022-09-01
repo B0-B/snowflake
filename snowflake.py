@@ -7,6 +7,7 @@ from datetime import datetime
 from numpy.random import randint
 from traceback import format_exc, print_exc
 from time import sleep
+import binascii
 import http.server, cgi
 import json
 
@@ -72,6 +73,21 @@ class Job:
         '''
         return self._subprocessIsAlive()
 
+    def output (self):
+
+        '''
+        A function which redirects the stdout from subprocess.
+        The console output will be joined to a string and returned.
+        '''
+
+        out = {'stdout': '', 'stderr': ''}
+        if self.subprocess:
+            stdout, stderr = self.subprocess.communicate()
+            out['stdout'] = stdout.decode('UTF-8')
+            out['stderr'] = stderr.decode('UTF-8')
+            return out
+        return out
+
     def start (self):
 
         '''
@@ -124,6 +140,14 @@ class Job:
             if mandatory:
                 raise ValueError(f'{arg} not specified correctly, {arg} must be a {argType} type.')
             return expected
+
+    def _exceptionOccured (self):
+
+        '''
+        Checks if the subprocess indicates errors/exceptions.
+        '''
+
+        return len(self.output()['stderr']) > 0
 
     def _subprocessIsAlive (self):
 
@@ -415,8 +439,8 @@ class Core:
         current_hour = datetime.now().hour
         current_minute = datetime.now().minute
         week_day = datetime.today().strftime('%A').lower()[:3]
-        print('manager', self.counter)
-        self.counter += 1
+        #print('manager', self.counter)
+        #self.counter += 1
         for id in self.jobs.keys():
 
             # override the current activity variable
@@ -424,18 +448,15 @@ class Core:
             # This ensures that isAlive() method will not be called inflationary.
             job = self.jobs[id]
             job['active'] = job['job'].isAlive()
-            print(f'job {id} ')
 
             # skip this job if it is disabled on purpose,
             # also make sure everything is deactivated.
             if job['disabled']:
-                print(0)
                 self._deactivateIfActive(id)
                 pass
 
             # check for weekday and skip if the current day is not included
             if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
-                print(1)
                 self._deactivateIfActive(id)
                 pass
 
@@ -452,21 +473,24 @@ class Core:
 
             # make sure that the job is finished in case
             # that the job should not be repeated.
-            # if not job['finished']:
-            #     print(4)
-            #     self._activateIfDeactivated(id)
-            # if not job['repeat'] and not job['finished']:
-            #     print(5)
-            #     job['finished'] = True
             if not job['active'] and not job['finished']:
                 self._activateIfDeactivated(id)
                 print('hit', job['repeat'], job['active'] )
                 if not job['repeat']:
                     print(5)
                     job['finished'] = True
-                
-            
 
+                    # check if errors or exceptions might have
+                    # caused the job to finish.
+                    if job['job']._exceptionOccured():
+
+                        self.log(f"Job '{job['name']}' ({id}) finished due to errors:", 'red')
+                        self.log(job['job'].output()['stderr'], 'red', indent=1)
+                    else:
+                        self.log(f"Job '{job['name']}' ({id}) finished successfully.", 'green')
+            
+            print('output:', job['job'].output())
+                
     def _suggestAllowedName (self, name):
 
         '''

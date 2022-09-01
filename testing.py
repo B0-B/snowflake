@@ -6,7 +6,7 @@ from client import client
 2 disable job
 '''
 
-test_id = 1  
+test_id = 1 
 
 if test_id == 0:
 
@@ -16,7 +16,7 @@ if test_id == 0:
     jobRequest = {
         'request': r,
         'name': 'test',
-        'target_path': '~/snowflake/test_job.py',
+        'target_path': '/home/b1/snowflake/test_job.py',
         'command': 'python3'
     }
     c.post(jobRequest)
