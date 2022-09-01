@@ -393,10 +393,10 @@ class Core:
 
     def _findIdByName (self, name):
 
-        job = self._findIdByName(name)
+        job = self._findJobByName(name)
         if job:
             return job['id']
-        return job
+        return None
 
     def _findJobByName (self, name):
 
@@ -405,7 +405,7 @@ class Core:
         otherwise it returns None.
         '''
 
-        for job in self.jobs:
+        for job in self.jobs.values():
             if name == job['name']:
                 return job
         return None
@@ -463,11 +463,9 @@ class Core:
             # check for time
             if job["operating_time_window"]:
                 if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
-                    print(2)
                     self._deactivateIfActive(id)
                     pass
                 if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
-                    print(3)
                     self._deactivateIfActive(id)
                     pass
 
@@ -475,21 +473,16 @@ class Core:
             # that the job should not be repeated.
             if not job['active'] and not job['finished']:
                 self._activateIfDeactivated(id)
-                print('hit', job['repeat'], job['active'] )
                 if not job['repeat']:
-                    print(5)
                     job['finished'] = True
-
                     # check if errors or exceptions might have
                     # caused the job to finish.
                     if job['job']._exceptionOccured():
-
                         self.log(f"Job '{job['name']}' ({id}) finished due to errors:", 'red')
                         self.log(job['job'].output()['stderr'], 'red', indent=1)
                     else:
                         self.log(f"Job '{job['name']}' ({id}) finished successfully.", 'green')
-            
-            print('output:', job['job'].output())
+        
                 
     def _suggestAllowedName (self, name):
 
@@ -590,7 +583,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             try:
                 # get the correct id of the job depending on variables
                 if 'name' in requestObject:
-                    id = self.Core._findIdByName(requestObject['name'])['id']
+                    id = self.Core._findIdByName(requestObject['name'])
                 elif 'id' in requestObject:
                     id = requestObject['id']
                 else:
