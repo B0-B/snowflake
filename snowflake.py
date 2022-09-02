@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import sys
+import pathlib
+from os import set_blocking, path, listdir
+from cgitb import reset
 import threading
-from subprocess import Popen, PIPE
-from datetime import datetime
+from subprocess import Popen, PIPE, STDOUT
+from datetime import datetime, timedelta
 from numpy.random import randint
 from traceback import format_exc, print_exc
 from time import sleep
 import binascii
+from importlib import import_module
+import importlib.util
 import http.server, cgi
 import json
 
@@ -82,9 +88,24 @@ class Job:
 
         out = {'stdout': '', 'stderr': ''}
         if self.subprocess:
-            stdout, stderr = self.subprocess.communicate()
-            out['stdout'] = stdout.decode('UTF-8')
-            out['stderr'] = stderr.decode('UTF-8')
+            # print('hit 1')
+            # sleep(3)
+            # stdout = self.subprocess.stdout
+            
+            # for line in self.subprocess.stdout:
+            #     sys.stdout.write(line)
+            #     print(line)
+            # print('stdout', stdout)
+            # stderr = self.subprocess.stderr.readline().rstrip()
+            # print('hit 2')
+
+            # ----- code which extracts the stdout ----
+            stdout = ''
+            stderr = ''
+            # -----------------------------------------
+            
+            out['stdout'] = stdout#.decode('UTF-8')
+            out['stderr'] = stderr#.decode('UTF-8')
             return out
         return out
 
@@ -97,9 +118,10 @@ class Job:
         if self._subprocessIsAlive():
             print(f'subprocess {self.id} is already alive!')
             return
-        self.subprocess = Popen(self.startCommandObject, stdout=PIPE, stderr=PIPE)
-        #print(f'subprocess {self.id} initiated ...')    
-        #self.process.start()
+        self.subprocess = Popen(self.startCommandObject, stdout=PIPE, stderr=STDOUT)
+        # disable blocking when trying to communicate with subprocess
+        # proposal: https://stackoverflow.com/questions/375427/a-non-blocking-read-on-a-subprocess-pipe-in-python
+        set_blocking(self.subprocess.stdout.fileno(), False)
         print(f'subprocess {self.id} initiated ...') 
 
     def stop (self):
@@ -204,6 +226,9 @@ class Core:
 
     def __init__ (self):
 
+        # time format
+        self.timeFormat = "%m-%d-%Y %H:%M:%S"
+
         # show banner
         self.log(self.banner, 'blue')
 
@@ -212,6 +237,10 @@ class Core:
 
         # API and request parameters
         self.mandatory_parameters = ['name', 'target_path', 'command']
+
+        # load all custom job objects
+        self.customDirectory = str(pathlib.Path(__file__).parent.resolve()) + '/jobs/custom'
+        self._loadCustomJobs()
 
         # managing daemon
         # testing = False
@@ -362,11 +391,30 @@ class Core:
             "repeat_sleep": 0,
             "target_path": requestObject['target_path'],
             "time_created": time_created,
+            "time_duration": 0,
             "time_started": None,
             "time_stopped": None
         }
 
         return True, stdout
+
+    def disable (self, identifier):
+
+        '''
+        Enables a job which corresponds with the identifier.
+        The identifier can be the job id or name.
+        '''
+
+        self._enableJob(identifier, False)
+        
+    def enable (self, identifier):
+
+        '''
+        Disables a job which corresponds with the identifier.
+        The identifier can be the job id or name.
+        '''
+
+        self._enableJob(identifier, True)
 
     # - private methods
     def _activateIfDeactivated (self, id):
@@ -379,8 +427,11 @@ class Core:
             # every outside/external activation call 
             # will reset the finished argument
             job['finished'] = False
+            # denote the start time
+            job['time_started'] = self._generateUTCTimestamp()
+            # finally start the job workload
             job['job'].start()
-    
+            
     def _deactivateIfActive (self, id):
 
         job = self.jobs[id]
@@ -389,7 +440,39 @@ class Core:
             self.log(f'Terminating job {id} ...', end='\r')
             job['active'] = False
             job['job'].stop()
-            self.log(f'Successfully terminated {id}.\n', 'green', end='\r')
+            
+            job['time_stopped'] = self._generateUTCTimestamp()
+            delta = datetime.strptime(job['time_stopped'], self.timeFormat) - datetime.strptime(job['time_started'], self.timeFormat)
+            # denote the time duration and save in job object
+            job['time_duration'] = delta.strftime("%d days %H:%M:%S")
+            self.log(f'Successfully terminated {id} after {job["time_duration"]} duration. \n', 'green', end='\r')
+
+    def _enableJob (self, identifier, value):
+
+        '''
+        Enables or disables the job corresponding to the provided
+        identifier. If the value provided is True, job will be enabled,
+        and vice versa.
+        '''
+
+        # find the corresponding job
+        job = None
+        if identifier in self.jobs:
+            job = self.jobs[identifier]
+        else:
+            for j in self.jobs.values():
+                if j['name'] == identifier:
+                    job = j
+        
+        # check if a job could be found
+        if not job:
+            self.log(f"No job was found for identifier '{identifier}'", 'red')
+        else:
+            job['disabled'] = not value
+            if value:
+                self.log(f"Successfully enabled '{job['name']}' ({job['id']}).", 'green')
+            else:
+                self.log(f"Successfully disabled '{job['name']}' ({job['id']}).", 'blue')
 
     def _findIdByName (self, name):
 
@@ -426,7 +509,65 @@ class Core:
 
     def _generateUTCTimestamp (self):
 
-        return datetime.today().strftime("%m-%d-%Y %H:%M:%S")
+        return datetime.today().strftime(self.timeFormat)
+
+    def _loadCustomJobs (self):
+
+        '''
+        Submethod which imports all custom job objects and deploys them.
+        '''
+
+        self.log(f'Load custom jobs from  {self.customDirectory} ...')
+
+        # load all file names
+        print('custom dir', self.customDirectory) 
+        for file in listdir(self.customDirectory):
+            if 'template' not in file and '__init__' not in file:
+                # override module string in relative python
+                # path fashion, so it is parsed correctly by importlib
+                module = f"jobs.custom.{file.replace('.py', '')}"
+                # try to import
+                try:
+                    # extract job object from the module
+                    spec = importlib.util.spec_from_file_location(module, self.customDirectory+'/'+file)
+                    custom_module = importlib.util.module_from_spec(spec)
+                    job = custom_module.CustomJob()
+                    
+                    # check before deploy if the dependecies are met
+                    if not job.dependencyCheck():
+                        ImportError(f"No dependencies installed for custom job {module}, skip deployment ...")
+
+                    # ----- deploying -----
+                    # now an alternative deploy is performed
+                    # for this generate an id and name first
+                    job_id = self._generateJobId()
+                    name = self._suggestAllowedName(job.name)
+                    # for custom jobs there is no targetpath needed, since the
+                    # workload is triggered directly from the custom job object.
+                    # The target_path will be overriden with the path of the custom job file.
+                    target_path = self.customDirectory+'/'+file
+                    # deploy the job by appending the new job to the jobs object
+                    self.jobs[job_id] = {
+                        "active": job.active,
+                        "disabled": False,
+                        "finished": False,
+                        "id": job_id,
+                        "job": job,
+                        "name": name,
+                        "operating_time_window": None,                 
+                        "operating_week_days": 'all',
+                        "repeat": False,
+                        "repeat_sleep": 0,
+                        "target_path": target_path,
+                        "time_created": self._generateUTCTimestamp(),
+                        "time_duration": 0,
+                        "time_started": None,
+                        "time_stopped": None
+                    }
+                    self.log(f"Successfully deployed custom job '{name}'", 'blue')
+                except:
+                    self.log(f'Could not import cutom job {module}\n{format_exc()}', 'red')
+                #print(module)
 
     def _manage (self):
         
@@ -436,54 +577,53 @@ class Core:
         and will flip it according to the time operating window.
         '''
 
-        current_hour = datetime.now().hour
-        current_minute = datetime.now().minute
-        week_day = datetime.today().strftime('%A').lower()[:3]
-        #print('manager', self.counter)
-        #self.counter += 1
-        for id in self.jobs.keys():
-
-            # override the current activity variable
-            # by measuring if the subprocess is alive.
-            # This ensures that isAlive() method will not be called inflationary.
-            job = self.jobs[id]
-            job['active'] = job['job'].isAlive()
-
-            # skip this job if it is disabled on purpose,
-            # also make sure everything is deactivated.
-            if job['disabled']:
-                self._deactivateIfActive(id)
-                pass
-
-            # check for weekday and skip if the current day is not included
-            if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
-                self._deactivateIfActive(id)
-                pass
-
-            # check for time
-            if job["operating_time_window"]:
-                if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
+        try:
+            current_hour = datetime.now().hour
+            current_minute = datetime.now().minute
+            week_day = datetime.today().strftime('%A').lower()[:3]
+            for id in self.jobs.keys():
+                # override the current activity variable
+                # by measuring if the subprocess is alive.
+                # This ensures that isAlive() method will not be called inflationary.
+                job = self.jobs[id]
+                job['active'] = job['job'].isAlive()
+                # skip this job if it is disabled on purpose,
+                # also make sure everything is deactivated.
+                if job['disabled']:
                     self._deactivateIfActive(id)
                     pass
-                if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
+                # check for weekday and skip if the current day is not included
+                if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
                     self._deactivateIfActive(id)
                     pass
+                # check for time
+                if job["operating_time_window"]:
+                    if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
+                        self._deactivateIfActive(id)
+                        pass
+                    if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
+                        self._deactivateIfActive(id)
+                        pass
+                # make sure that the job is finished in case
+                # that the job should not be repeated.
+                if not job['active'] and not job['finished']:
+                    # activate the job if it's not actively running
+                    # and the finished flag was not enabled.
+                    self._activateIfDeactivated(id)
+                    if not job['repeat']:
+                        # set the finished flag to true already
+                        # to avoid another trigger in the next round
+                        job['finished'] = True
+                        # check if errors or exceptions might have
+                        # caused the job to finish.
+                        if job['job']._exceptionOccured():
+                            self.log(f"Job '{job['name']}' ({id}) finished due to errors:", 'red')
+                            self.log(job['job'].output()['stderr'], 'red', indent=1)
+                        else:
+                            self.log(f"Job '{job['name']}' ({id}) finished successfully.", 'green')
+        except:
+            self.log(format_exc(), 'red')
 
-            # make sure that the job is finished in case
-            # that the job should not be repeated.
-            if not job['active'] and not job['finished']:
-                self._activateIfDeactivated(id)
-                if not job['repeat']:
-                    job['finished'] = True
-                    # check if errors or exceptions might have
-                    # caused the job to finish.
-                    if job['job']._exceptionOccured():
-                        self.log(f"Job '{job['name']}' ({id}) finished due to errors:", 'red')
-                        self.log(job['job'].output()['stderr'], 'red', indent=1)
-                    else:
-                        self.log(f"Job '{job['name']}' ({id}) finished successfully.", 'green')
-        
-                
     def _suggestAllowedName (self, name):
 
         '''
@@ -510,11 +650,9 @@ class Core:
                 name_copy = name_copy + '_1'
             
         return name_copy
-        
 
-
+# instantiate the core to fix the pointers
 __core__ = Core()
-
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
 
@@ -541,6 +679,13 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST (self):
 
+        self.Core.log(f"New request by {self.client_address[0]} ...")
+
+        # initialize the response object first.
+        # this object will be filled throughout the protocol
+        # and then send back to client.
+        responseObject = {'response': '', 'errors': []}
+
         # communicate header
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
@@ -559,44 +704,78 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
         requestObject = json.loads(jsonPkg) 
 
-        '''
-        determine request type
-          - request: will add a request object
-          - ls: list all jobs with info
-          - set: set a specific argument
-        '''
-        if requestObject['request'].lower() == 'ls':
-            self.Core.list_to_console()
-        elif requestObject['request'].lower() == 'deploy':
-            self.Core.log(f"Deploying new job request by {self.client_address[0]} ...", 'y')
-            try:
+        try:
+
+            '''
+            determine request type
+                - request: will add a request object
+                - ls: list all jobs with info
+                - set: set a specific argument
+            '''
+            if requestObject['request'].lower() == 'ls':
+                self.Core.list_to_console()
+            elif requestObject['request'].lower() == 'deploy':
+                self.Core.log(f"Deploying new job ...", 'y')
                 success, info = self.Core.deploy(requestObject)
                 if success:
-                    self.Core.log(f"Successfully deployed new cron job process '{requestObject['name']}'", 'y')
+                    msg = f"Successfully deployed new cron job process '{requestObject['name']}'"
+                    responseObject['response'] = msg
                 else:
-                    self.Core.log(info, 'red')
-            except:
-                self.Core.log('An exception occured with the request from', 'red')
-                self.Core.log(format_exc(), 'red')        
-        elif requestObject['request'].lower() == 'set':
-            self.Core.log(f"{self.client_address[0]} requested an argument change in '{requestObject['name']}' job.", 'y')
-            try:
+                    self.Core.log(info, 'red')  
+                    responseObject['errors'].append(info)      
+            elif requestObject['request'].lower() == 'disable':
+                if 'name' in requestObject:
+                    identifier = requestObject['name']
+                    if not self.Core._findIdByName(identifier):
+                        responseObject['errors'].append(f"Identifier '{identifier}' not found.")
+                elif 'id' in requestObject:
+                    identifier = requestObject['id']
+                    if identifier not in self.jobs:
+                        responseObject['errors'].append(f"Identifier '{identifier}' not found.")
+                else:
+                    err = f"No identifier (name, or id needed) provided."
+                    responseObject['errors'].append(err)
+                # disable the job if the identifier search yields no errors
+                if len(responseObject['errors']) == 0:
+                    self.Core.disable(identifier)
+
+            elif requestObject['request'].lower() == 'set':
+                self.Core.log(f"{self.client_address[0]} requested an argument change in '{requestObject['name']}' job.", 'y')
                 # get the correct id of the job depending on variables
                 if 'name' in requestObject:
-                    id = self.Core._findIdByName(requestObject['name'])
+                        id = self.Core._findIdByName(requestObject['name'])
                 elif 'id' in requestObject:
-                    id = requestObject['id']
+                        id = requestObject['id']
                 else:
-                    raise KeyError('No name nor id was provided!')    
+                        raise KeyError('No name nor id was provided!')    
                 # unpack the argument and value
                 arg, val = requestObject['argument']
                 # apply
                 self.Core.jobs[id][arg] = val       
-            except:
-                self.Core.log(f'An exception occured during the request from {self.client_address[0]}', 'red')
-                self.Core.log(format_exc(), 'red')  
-        else:
-            self.send_response(403)
+            else:
+                self.send_response(403)
+            
+        except:
+            
+            # inform the client that an exception occured, without details.
+            err = f'An exception occured during the request.'
+            requestObject['errors'].append(err)
+            # log server-side console with details.
+            self.Core.log(err + '\n' + format_exc(), 'red') 
+
+        finally:
+
+            # log output in server-side console
+            if len(responseObject['response']) > 0:
+                self.Core.log(responseObject['response'], 'y')
+            if len(responseObject['errors']) > 0:
+                self.Core.log(responseObject['errors'][0], 'red')
+
+            # send the response object
+            self.end_headers()
+            self.wfile.write(json.dumps(responseObject).encode('utf-8'))
+            
+
 
 if __name__ == '__main__':
     PORT = 3000

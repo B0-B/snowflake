@@ -1,45 +1,43 @@
 from client import client
-
+from time import sleep
 '''
 0 deploy test
 1 list jobs info
 2 disable job
 '''
 
-test_id = 1
 
-if test_id == 0:
 
-    c = client()
-    r = 'deploy'
-    #r = 'ls'
-    jobRequest = {
-        'request': r,
-        'name': 'test',
-        'target_path': '/home/b1/snowflake/test_job.py',
-        'command': 'python3'
-    }
-    c.post(jobRequest)
+c = client()
 
-elif test_id == 1:
+def test(test_id):
 
-    c = client()
-    #r = 'deploy'
-    r = 'ls'
-    jobRequest = {
-        'request': r,
-        'name': 'test',
-        'target_path': '~/snowflake/test_job.py',
-        'command': 'python3'
-    }
-    c.post(jobRequest)
+    if test_id == 0:
+        r = 'deploy'
+        jobRequest = {
+            'request': r,
+            'name': 'test',
+            'target_path': '/home/b1/snowflake/test_job.py',
+            'command': 'python3'
+        }
+    elif test_id == 1:
+        r = 'ls'
+        jobRequest = {
+            'request': 'ls'
+        }
+    elif test_id == 2:
+        jobRequest = {
+            'request': 'disable',
+            'name': 'test'
+        }
+    print(c.post(jobRequest))
 
-elif test_id == 2:
 
-    c = client()
-    jobRequest = {
-        'request': 'set',
-        'argument': ('disable', True),
-        'name': 'test'
-    }
-    c.post(jobRequest)
+test(0) # deploy
+quit()
+sleep(3)
+test(1) # check status
+sleep(3)
+test(2) # disable
+sleep(1)
+test(1) # check status
