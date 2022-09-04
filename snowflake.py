@@ -27,7 +27,6 @@ class pipe(threading.Thread):
         self.stoprequest = threading.Event()
 
     def run(self):
-        print('start thread ...')
         while not self.stoprequest.isSet():
             try: # important during init, otherwise crash
                 self.func(*self.args)
@@ -520,9 +519,10 @@ class Core:
         self.log(f'Load custom jobs from  {self.customDirectory} ...')
 
         # load all file names
-        print('custom dir', self.customDirectory) 
         for file in listdir(self.customDirectory):
-            if 'template' not in file and '__init__' not in file:
+            # check if the parsed node is a file
+            isFile = pathlib.Path(self.customDirectory+'/'+file).is_file()
+            if isFile and 'template' not in file and '__init__' not in file:
                 # override module string in relative python
                 # path fashion, so it is parsed correctly by importlib
                 module = f"jobs.custom.{file.replace('.py', '')}"
@@ -531,19 +531,19 @@ class Core:
                     # extract job object from the module
                     spec = importlib.util.spec_from_file_location(module, self.customDirectory+'/'+file)
                     custom_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(custom_module)
                     job = custom_module.CustomJob()
-                    
                     # check before deploy if the dependecies are met
                     if not job.dependencyCheck():
-                        ImportError(f"No dependencies installed for custom job {module}, skip deployment ...")
-
+                        self.log(f"No dependencies installed for custom job {module}, skip deployment ...", 'y')
+                        continue
                     # ----- deploying -----
                     # now an alternative deploy is performed
                     # for this generate an id and name first
                     job_id = self._generateJobId()
                     name = self._suggestAllowedName(job.name)
                     # for custom jobs there is no targetpath needed, since the
-                    # workload is triggered directly from the custom job object.
+                    # workload is triggered directly from the custom job object (method).
                     # The target_path will be overriden with the path of the custom job file.
                     target_path = self.customDirectory+'/'+file
                     # deploy the job by appending the new job to the jobs object
@@ -566,8 +566,7 @@ class Core:
                     }
                     self.log(f"Successfully deployed custom job '{name}'", 'blue')
                 except:
-                    self.log(f'Could not import cutom job {module}\n{format_exc()}', 'red')
-                #print(module)
+                    self.log(f"Could not import custom job '{module}'\n{format_exc()}", 'red')
 
     def _manage (self):
         
@@ -591,19 +590,19 @@ class Core:
                 # also make sure everything is deactivated.
                 if job['disabled']:
                     self._deactivateIfActive(id)
-                    pass
+                    continue
                 # check for weekday and skip if the current day is not included
                 if job["operating_week_days"] != 'all' and week_day not in job["operating_week_days"]:
                     self._deactivateIfActive(id)
-                    pass
+                    continue
                 # check for time
                 if job["operating_time_window"]:
                     if current_hour < int(job["operating_time_window"][0].split(':')[0]) or current_hour > int(job["operating_time_window"][1].split(':')[0]):
                         self._deactivateIfActive(id)
-                        pass
+                        continue
                     if current_minute < int(job["operating_time_window"][0].split(':')[1]) or current_minute > int(job["operating_time_window"][1].split(':')[1]):
                         self._deactivateIfActive(id)
-                        pass
+                        continue
                 # make sure that the job is finished in case
                 # that the job should not be repeated.
                 if not job['active'] and not job['finished']:

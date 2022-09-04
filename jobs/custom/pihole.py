@@ -5,6 +5,7 @@ import os
 import subprocess
 from subprocess import PIPE, STDOUT
 
+
 class CustomJob:
 
     '''
@@ -14,7 +15,7 @@ class CustomJob:
     name = 'pihole'
     active = True
 
-    def dependecyCheck (self):
+    def dependencyCheck (self):
         '''
         This method should return a boolean dep. if the package is installed.
         '''
@@ -64,5 +65,6 @@ class CustomJob:
 
         return subprocess.Popen(command, stdout=PIPE, stderr=STDOUT).stdout.readline().decode('utf-8')
 
-cj = custom_job()
-print(cj.dependecyCheck())
+if __name__ == '__main__':
+    cj = custom_job()
+    print(cj.dependecyCheck())
