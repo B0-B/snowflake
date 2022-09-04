@@ -116,12 +116,10 @@ class Job:
 
         if self._subprocessIsAlive():
             print(f'subprocess {self.id} is already alive!')
-            return
         self.subprocess = Popen(self.startCommandObject, stdout=PIPE, stderr=STDOUT)
         # disable blocking when trying to communicate with subprocess
         # proposal: https://stackoverflow.com/questions/375427/a-non-blocking-read-on-a-subprocess-pipe-in-python
         set_blocking(self.subprocess.stdout.fileno(), False)
-        print(f'subprocess {self.id} initiated ...') 
 
     def stop (self):
 
@@ -207,16 +205,8 @@ class Core:
     '''
 
     banner=f'''
-         ..    ..    
-         '\    /'     
-           \\\\//       
-      _.__\\\\\///__._  
-       '  ///\\\\\  '   
-           //\\\\       
-         ./    \.     
-         ''    ''
-
-    s n o w  f l a k e
+        
+    s n o w f l a k e
 
          🄯 {min([2022, datetime.now().year])} 
     '''
@@ -229,7 +219,7 @@ class Core:
         self.timeFormat = "%m-%d-%Y %H:%M:%S"
 
         # show banner
-        self.log(self.banner, 'blue')
+        self.log(self.banner, 'blue', indent=1)
 
         # process data
         self.jobs = {}
@@ -251,7 +241,7 @@ class Core:
         # else:
         self.daemon = pipe(self._manage, wait=1)
         self.daemon.start()
-        self.log('Started job management daemon.')
+        self.log('Started job management.')
     
     def list_to_console (self):
 
@@ -259,27 +249,21 @@ class Core:
         A dashboard-like summary output of all deployed jobs.
         '''
 
-        print('job\t\tactive\t\tdisabled\tcreated\t\t\tjob id')
-        for id, job in self.jobs.items():
-            a_col = '\033[92m'
-            if not job["active"]: 
-                a_col = '\033[91m'
-            print(f'{job["name"]}\t\t{a_col}{job["active"]}\033[0m\t\t{job["disabled"]}\t\t{job["time_created"]}\t{id}')
+        print(self._list())
 
-    def log (self, stdout, color='', indent=0, end='\n'):
+    def log (self, stdout, color='', indent=0, end='\n', no_stamp=False):
 
         '''
         A simple logger method which allows to direct all outputs to console, file etc.
         '''
 
-        color = color.lower()
-
-        if indent > 0:
-            head = ''
+        if indent > 0 or no_stamp:
+            stamp = ''
             indent = ''.join(['\t']*indent)
         else:
-            head = f'\033[96m[ {self.name} | {self._generateUTCTimestamp()} ]\033[0m\t'
+            stamp = f'\033[96m[ {self.name} | {self._generateUTCTimestamp()} ]\033[0m\t'
             indent = ''
+        color = color.lower()
         if 'green' in color:
             color = '\033[92m'
         elif 'red' in color:
@@ -290,7 +274,8 @@ class Core:
             color = '\033[96m'
         else:
             color = '\033[0m'
-        print(f'{head}{indent}{color}{stdout}\033[0m', end=end)
+        
+        print(f'{stamp}{indent}{color}{stdout}\033[0m', end=end)
     
     def deploy (self, requestObject):
 
@@ -443,9 +428,8 @@ class Core:
             job['time_stopped'] = self._generateUTCTimestamp()
             delta = datetime.strptime(job['time_stopped'], self.timeFormat) - datetime.strptime(job['time_started'], self.timeFormat)
             # denote the time duration and save in job object
-            job['time_duration'] = delta.strftime("%d days %H:%M:%S")
-            self.log(f'Successfully terminated {id} after {job["time_duration"]} duration. \n', 'green', end='\r')
-
+            job['time_duration'] = delta
+            
     def _enableJob (self, identifier, value):
 
         '''
@@ -509,6 +493,20 @@ class Core:
     def _generateUTCTimestamp (self):
 
         return datetime.today().strftime(self.timeFormat)
+
+    def _list (self):
+
+        '''
+        Lists all jobs to a string table.
+        '''
+
+        output = 'job\t\tactive\t\tdisabled\tcreated\t\t\tjob id'
+        for id, job in self.jobs.items():
+            a_col = '\033[92m'
+            if not job["active"]: 
+                a_col = '\033[91m'
+            output += f'\n{job["name"]}\t\t{a_col}{job["active"]}\033[0m\t\t{job["disabled"]}\t\t{job["time_created"]}\t{id}'
+        return output
 
     def _loadCustomJobs (self):
 
@@ -623,6 +621,13 @@ class Core:
         except:
             self.log(format_exc(), 'red')
 
+    def _retrieveServerInfoFrom (self, handler):
+
+        '''
+        This method is called in the handler.
+        '''
+        print('hello')
+
     def _suggestAllowedName (self, name):
 
         '''
@@ -675,7 +680,6 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     '''
 
     Core = __core__
-
     def do_POST (self):
 
         self.Core.log(f"New request by {self.client_address[0]} ...")
@@ -697,7 +701,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # extract json package
-        # double loads() turns to dict type, 
+        # double json.loads() turns to dict type, 
         # this dictionary will be the extracted request object
         #print('headers', self.headers) # for testing
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
@@ -712,7 +716,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 - set: set a specific argument
             '''
             if requestObject['request'].lower() == 'ls':
-                self.Core.list_to_console()
+                responseObject['response'] = self.Core._list()
             elif requestObject['request'].lower() == 'deploy':
                 self.Core.log(f"Deploying new job ...", 'y')
                 success, info = self.Core.deploy(requestObject)
@@ -737,8 +741,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 # disable the job if the identifier search yields no errors
                 if len(responseObject['errors']) == 0:
                     self.Core.disable(identifier)
-
-            elif requestObject['request'].lower() == 'set':
+            elif requestObject['request'].lower() == 'ping':
+                responseObject['response'] = 'ok'
+            elif requestObject['request'].lower() == 'config':
                 self.Core.log(f"{self.client_address[0]} requested an argument change in '{requestObject['name']}' job.", 'y')
                 # get the correct id of the job depending on variables
                 if 'name' in requestObject:
@@ -777,6 +782,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
+    
+    # -- Build Server --
+    # set port and handler
     PORT = 3000
-    with http.server.HTTPServer(('localhost', PORT), APIHandler) as srv:
+    Handler = APIHandler
+    # initialize server
+    with http.server.HTTPServer(('localhost', PORT), Handler) as srv:
         srv.serve_forever()

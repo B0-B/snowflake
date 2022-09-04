@@ -16,7 +16,7 @@ def test(test_id):
         r = 'deploy'
         jobRequest = {
             'request': r,
-            'name': 'test',
+            'name': 'testing',
             'target_path': '/home/b1/snowflake/test_job.py',
             'command': 'python3'
         }
@@ -28,13 +28,13 @@ def test(test_id):
     elif test_id == 2:
         jobRequest = {
             'request': 'disable',
-            'name': 'test'
+            'name': 'testing'
         }
     print(c.post(jobRequest))
 
 
 test(0) # deploy
-quit()
+#quit()
 sleep(3)
 test(1) # check status
 sleep(3)
