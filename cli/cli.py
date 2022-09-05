@@ -110,6 +110,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog=__alias__, description=description)
 
     for arg, info in __optional__.items():
+        #print(info)
         parser.add_argument(info[0], help=info[1], type=info[2])
         #command_group.add_argument(option[0], help=option[1])
     
@@ -121,8 +122,12 @@ if __name__ == '__main__':
         command, help = option
         subparsers_dict[command] = subparsers.add_parser(command, help=help)
         subparser = subparsers_dict[command]
+        for arg in __command_args__[command]:
+            info = __optional__[arg]
+            subparser.add_argument(info[0], help=info[1], type=info[2])
+
     # add optional arguments
-    
+    print('hit')
 
     # add optional arguments
     # add command arguments
@@ -146,17 +151,21 @@ if __name__ == '__main__':
     # check if a host was provided otherwise warn,
     # but first check a priori if a host was just set,
     # then the warning may be skipped.
-    print('test', args.__dict__['host'])
+    #print('test', args.__dict__['host'])
     if 'host' in args.__dict__ and args.__dict__['host'] != None:
         host = args.__dict__['host']
+        if 'port' in args.__dict__ and args.__dict__['port'] != None:
+            port = args.__dict__['port'] 
         if 'http://' not in host:
             host = 'http://' + host
         url = host + ':' + str(port)
+        server_json['host'] = host
+        server_json['port'] = port
         try:
             if post(url, {'request': 'ping'}) != 'ok':
                 ValueError()
             with open(__json__, "w+") as f:
-                json.dump(f)
+                json.dump(server_json)
             log('Successfully reached snowflake server and set new host.', 'green')
         except:
             log(f'Cannot reach server under {url}', 'red')
