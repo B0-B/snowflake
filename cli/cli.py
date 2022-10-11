@@ -50,7 +50,7 @@ __command_args__ = {
     'halt': []
 }
 
-
+import sys
 import argparse
 import json
 from traceback import format_exc
@@ -151,7 +151,6 @@ if __name__ == '__main__':
     # check if a host was provided otherwise warn,
     # but first check a priori if a host was just set,
     # then the warning may be skipped.
-    #print('test', args.__dict__['host'])
     if 'host' in args.__dict__ and args.__dict__['host'] != None:
         host = args.__dict__['host']
         if 'port' in args.__dict__ and args.__dict__['port'] != None:
@@ -162,10 +161,10 @@ if __name__ == '__main__':
         server_json['host'] = host
         server_json['port'] = port
         try:
-            if post(url, {'request': 'ping'}) != 'ok':
+            if post(url, {'request': 'ping'}) != 'ping received.':
                 ValueError()
             with open(__json__, "w+") as f:
-                json.dump(server_json)
+                json.dump(server_json, f)
             log('Successfully reached snowflake server and set new host.', 'green')
         except:
             log(f'Cannot reach server under {url}', 'red')
@@ -183,9 +182,12 @@ if __name__ == '__main__':
 
     # parse the raw input command word by word
     rawInputWords = []
-    for word in args.text.split(' '):
-        if word != '':
-            rawInputWords.append(word)
+    # check if any argument was provided
+    if len(sys.argv) > 1:
+        print('args', args)
+        for word in args.text.split(' '):
+            if word != '':
+                rawInputWords.append(word)
 
     # next parse the command from the raw input 
     # which is crucial to continue
