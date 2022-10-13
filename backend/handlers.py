@@ -61,7 +61,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         # this dictionary will be the extracted request object
         #print('headers', self.headers) # for testing
         jsonPkg = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-        requestObject = json.loads(jsonPkg) 
+        print('json', jsonPkg)
+        requestObject = jsonPkg; 
 
         try:
 
@@ -72,7 +73,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 - set: set a specific argument
             '''
             if requestObject['request'].lower() == 'ls':
-                responseObject['response'] = self.Core._list()
+                responseObject['response'] = self.Core._listToJson()
             elif requestObject['request'].lower() == 'deploy':
                 self.Core.log(f"Deploying new job ...", 'y')
                 success, info = self.Core.deploy(requestObject)
@@ -135,28 +136,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(responseObject).encode('utf-8'))
 
-class WebHandler(http.server.SimpleHTTPRequestHandler):
-
-    '''
-    Casts a web interface to communicate more easily with api.
-    '''
-
-    Core = __core__
-    extensions_map = {
-        '': 'application/octet-stream',
-        '.manifest': 'text/cache-manifest',
-        '.html': 'text/html',
-        '.png': 'image/png',
-        '.jpg': 'image/jpg',
-        '.svg':	'image/svg+xml',
-        '.css':	'text/css',
-        '.js':'application/x-javascript',
-        '.wasm': 'application/wasm',
-        '.json': 'application/json',
-        '.xml': 'application/xml',
-    }
-
     def do_GET (self):
+
+        '''
+        Casts a web interface to communicate more easily with api.
+        '''
         
         # communicate header
         self.send_response(200)
@@ -169,4 +153,3 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(html)
         #return http.server.SimpleHTTPRequestHandler.do_GET(self)
         #self.send_response(__root__ + '/client/index.html')
-        

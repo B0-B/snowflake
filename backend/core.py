@@ -323,6 +323,17 @@ class Core:
                 a_col = '\033[91m'
             output += f'\n{job["name"]}\t\t{a_col}{job["active"]}\033[0m\t\t{job["disabled"]}\t\t{job["time_created"]}\t{id}'
         return output
+    
+    def _listToJson (self):
+
+        '''
+        Lists all jobs compatible to json table format.
+        '''
+        
+        out = []
+        for job in self.jobs.values():        
+            out.append(job)
+        return out
 
     def _loadCustomJobs (self):
 

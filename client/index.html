@@ -52,6 +52,7 @@
                     },
                     mounted: async function () {
                         document.title = this.title;
+                        this.updateTable()
                     },
                     methods: {
                         createTableFromJSON: function (jsonList, ID, className='') {
@@ -104,7 +105,13 @@
                             divContainer.innerHTML = "";
                             divContainer.appendChild(table);
                         },
+                        request_: async function (options, url) {
+                            result = await fetch(options, url);
+                            console.log("fetch test", result)
+                        },
                         request: async function (options, path) {
+
+                            /* JSON request to api */
       
                             return new Promise(function (resolve, reject) {
                                 // setup HTTP request 
@@ -133,6 +140,11 @@
                                 // send stringed options
                                 xhr.send(JSON.stringify(options)); 
                             });
+                        },
+                        updateTable: async function () {
+                            // update table with job info
+                            const jobsList = await this.request({'request': 'ls'}, '');
+                            await this.createTableFromJSON(jobsList, 'job-table');
                         }
                     }
                 })
