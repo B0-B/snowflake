@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from backend.pipe import pipe
+from backend.job import Job
 import pathlib
 from os import listdir
 from datetime import datetime
@@ -435,13 +436,6 @@ class Core:
                             self.log(f"Job '{job['name']}' ({id}) finished successfully.", 'green')
         except:
             self.log(format_exc(), 'red')
-
-    def _retrieveServerInfoFrom (self, handler):
-
-        '''
-        This method is called in the handler.
-        '''
-        print('hello')
 
     def _suggestAllowedName (self, name):
 

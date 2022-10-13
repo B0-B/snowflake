@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+    <document>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="robots" content="noindex">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+            <link rel='shortcut icon' type='image/x-icon' href='favicon.ico' />
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12/dist/vue.js"></script>
+            <script type="text/javascript" src="http://code.jquery.com/jquery-1.7.1.min.js"></script>
+            <style>
+                .body-dark-theme {
+                    color: #ddd;
+                    background-color: #383838;
+                }
+                .body-light-theme {
+                    color: #383838;
+                    background-color: #ddd;
+                }
+                #app {
+                    width: 60%;
+                    margin-left: 20%;
+                    margin-right: 20%;
+                }
+            </style>
+        </head>
+        <body class="body-light-theme">
+            <!-- bootstrap cheat sheet
+            .col-xs- , (<768px)
+            .col-sm- , (≥768px)
+            .col-md- , (≥992px)
+            .col-lg- , (≥1200px)
+            -->
+            <!-- html -->
+            <div id="app" class="container-fluid p-0">
+                <div id="logo" class="row no-gutters">
+                    <h1>{{title}}</h1>
+                </div>
+                <div id="job-section" class="row no-gutters">
+                    <table id="job-table" class="table-striped table-dark"></table>
+                </div>
+            </div>
+            
+            <!-- Vue.js -->
+            <script>
+                var app = new Vue({
+                    el: '#app',
+                    data: {
+                        title: "snowflake",
+                    },
+                    mounted: async function () {
+                        document.title = this.title;
+                    },
+                    methods: {
+                        createTableFromJSON: function (jsonList, ID, className='') {
+                    
+                            // EXTRACT VALUE FOR HTML HEADER. 
+                            // ('Book ID', 'Book Name', 'Category' and 'Price')
+                            var col = [];
+                            for (var i = 0; i < jsonList.length; i++) {
+                                for (var key in jsonList[i]) {
+                                    if (col.indexOf(key) === -1) {
+                                        col.push(key);
+                                    }
+                                }
+                            }
+                    
+                            // CREATE DYNAMIC TABLE.
+                            var table = document.createElement("table");
+
+                            // FORWARD A CLASS METHOD
+                            try {
+                                table.classList.add(className);
+                                table.classList.add("text-white");
+                            } catch (error) {
+                                //
+                            }
+                            
+                    
+                            // CREATE HTML TABLE HEADER ROW USING THE EXTRACTED HEADERS ABOVE.
+                    
+                            var tr = table.insertRow(-1);                   // TABLE ROW.
+                            for (var i = 0; i < col.length; i++) {
+                                var th = document.createElement("th");      // TABLE HEADER.
+                                th.innerHTML = col[i];
+                                tr.appendChild(th);
+                            }
+                    
+                            // ADD JSON DATA TO THE TABLE AS ROWS.
+                            for (var i = 0; i < jsonList.length; i++) {
+                    
+                                tr = table.insertRow(-1);
+                    
+                                for (var j = 0; j < col.length; j++) {
+                                    var tabCell = tr.insertCell(-1);
+                                    tabCell.innerHTML = jsonList[i][col[j]];
+                                }
+                            }
+                    
+                            // FINALLY ADD THE NEWLY CREATED TABLE WITH JSON DATA TO A CONTAINER.
+                            var divContainer = document.getElementById(ID);
+                            divContainer.innerHTML = "";
+                            divContainer.appendChild(table);
+                        },
+                        request: async function (options, path) {
+      
+                            return new Promise(function (resolve, reject) {
+                                // setup HTTP request 
+                                var xhr = new XMLHttpRequest(); 
+                                console.log('req-json', options)
+                                xhr.open("POST", path, true); 
+                                xhr.setRequestHeader("Content-type", "application/json;charset=UTF-8"); 
+                                
+                                // log response
+                                xhr.onreadystatechange = function () {  
+                                    if (xhr.readyState == 4 && xhr.status == 200) {
+                                        var json = JSON.parse(xhr.responseText);
+                                        if (Object.keys(json).includes('error') && json['error'].length != 0) { // if errors occur
+                                            console.log('server:', json['error'])
+                                        } else if (json['info'] != '') { // if an info was left
+                                            console.log('server:', json['info'])
+                                        } resolve(json);
+                                    }
+                                }
+                        
+                                // handle errors
+                                xhr.onerror = function() {
+                                    reject({'errors': ['error during request: no connection']})
+                                }
+                        
+                                // send stringed options
+                                xhr.send(JSON.stringify(options)); 
+                            });
+                        }
+                    }
+                })
+            </script>
+
+            <!-- bootstrap -->
+            <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+            <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+            
+        </body>
+
+        
+    </document>
+</html>

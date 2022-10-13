@@ -135,22 +135,38 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(responseObject).encode('utf-8'))
 
-class WebHandler(http.server.BaseHTTPRequestHandler):
+class WebHandler(http.server.SimpleHTTPRequestHandler):
 
     '''
     Casts a web interface to communicate more easily with api.
     '''
 
     Core = __core__
-    def do_POST (self):
+    extensions_map = {
+        '': 'application/octet-stream',
+        '.manifest': 'text/cache-manifest',
+        '.html': 'text/html',
+        '.png': 'image/png',
+        '.jpg': 'image/jpg',
+        '.svg':	'image/svg+xml',
+        '.css':	'text/css',
+        '.js':'application/x-javascript',
+        '.wasm': 'application/wasm',
+        '.json': 'application/json',
+        '.xml': 'application/xml',
+    }
+
+    def do_GET (self):
         
         # communicate header
         self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=UTF-8')
-        ctype, _ = cgi.parse_header(self.headers['Content-Type'])
+        self.end_headers()
+        self.path = '/client/'
+        filename = __root__ + self.path + 'index.html'
+        with open(filename, 'rb') as fh:
+            html = fh.read()
+            #html = bytes(html, 'utf8')
+            self.wfile.write(html)
+        #return http.server.SimpleHTTPRequestHandler.do_GET(self)
+        #self.send_response(__root__ + '/client/index.html')
         
-        # reject non-json content
-        if ctype != 'application/json':
-            self.send_response(400)
-            self.end_headers()
-            return
